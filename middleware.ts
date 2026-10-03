@@ -2,7 +2,9 @@
 // Runs before the filesystem/static cache on Vercel (Routing Middleware, Edge).
 // Blocks third-party sites from hotlinking images/JSON while allowing:
 //   - empty/missing referer (direct visits, curl, download tools)
-//   - same-site referers (gpt-image2.canghe.ai and its subdomains/preview)
+//   - same-site referers (the request's own host, its subdomains, and the
+//     stable production aliases below; preview vercel.app domains are the
+//     request's own host at request time, so they are covered automatically)
 // Every blocked attempt is logged with client IP so abuse can be traced.
 
 const ALLOWED_REFERRER_HOSTS = [
@@ -13,6 +15,21 @@ const ALLOWED_REFERRER_HOSTS = [
 ];
 
 const PROTECTED_PREFIXES = ['/images/', '/cases.json', '/assets/', '/gpt-image-2-5/'];
+
+function isAllowedReferer(refererHostname, requestHostname) {
+  if (!refererHostname) {
+    return false;
+  }
+  if (
+    requestHostname &&
+    (refererHostname === requestHostname || refererHostname.endsWith('.' + requestHostname))
+  ) {
+    return true;
+  }
+  return ALLOWED_REFERRER_HOSTS.some(
+    (host) => refererHostname === host || refererHostname.endsWith('.' + host)
+  );
+}
 
 export default function middleware(request) {
   const url = new URL(request.url);
@@ -34,13 +51,11 @@ export default function middleware(request) {
     refererHostname = null;
   }
 
-  const allowed =
-    refererHostname &&
-    ALLOWED_REFERRER_HOSTS.some(
-      (host) => refererHostname === host || refererHostname.endsWith('.' + host)
-    );
+  const requestHostname = (request.headers.get('host') || url.hostname || '')
+    .split(':')[0]
+    .toLowerCase();
 
-  if (allowed) {
+  if (isAllowedReferer(refererHostname, requestHostname)) {
     return undefined;
   }
 
